@@ -1,0 +1,15 @@
+{
+  "name": "timetable-viz",
+  "local_port": 51211,
+  "entrypoint": "bun run dev",
+  "publish": {
+    "label": "timetable-viz",
+    "type": "http",
+    "entrypoint": "bun run prod",
+    "published_port": 57688,
+    "env": {
+      "NODE_ENV": "production",
+      "ZO_CLIENT_IDENTITY_TOKEN": "none"
+    }
+  }
+}
