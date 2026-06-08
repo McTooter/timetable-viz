@@ -17,6 +17,7 @@ import {
   clearSource,
 } from "./src/lib/timetable-db";
 import { colorForSubject } from "./src/lib/timetable-types";
+import { imageToTimetableText, parseExtractedRows } from "./src/lib/timetable-ocr";
 import type { TimetableSource } from "./src/lib/timetable-types";
 
 // AI agents: read README.md for navigation and contribution guidance.
@@ -117,6 +118,33 @@ app.delete("/api/entries", (c) => {
  * a small status file the bot process writes to. If the file is missing
  * or stale, the bot is considered offline.
  */
+app.post("/api/ocr", async (c) => {
+  const form = await c.req.parseBody();
+  const file = form["file"];
+  if (!(file instanceof File)) {
+    return c.json({ error: "missing 'file' multipart field" }, 400);
+  }
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const b64 = btoa(String.fromCharCode(...buf));
+  const mime = file.type || "image/jpeg";
+  let ocrText = "";
+  try {
+    ocrText = await imageToTimetableText({ base64: b64, mimeType: mime });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+  const rows = parseExtractedRows(ocrText);
+  const entries = parseWhatsAppDump(rows.join("\n"));
+  if (entries.length === 0) {
+    return c.json({ added: 0, updated: 0, raw: ocrText, rows });
+  }
+  for (const e of entries) {
+    e.color = e.color ?? colorForSubject(e.subject);
+  }
+  const result = upsertEntries(entries as never);
+  return c.json({ ...result, raw: ocrText, rows, entries });
+});
+
 app.get("/api/bot/status", async (c) => {
   const statusFile =
     process.env.TIMETABLE_BOT_STATUS_PATH ??

@@ -5,6 +5,7 @@ import {
   parseJSONTimetable,
   sortEntries,
 } from "@/lib/timetable-parser";
+import { parseExtractedRows } from "@/lib/timetable-ocr";
 import type { TimetableEntry } from "@/lib/timetable-types";
 
 type Props = {
@@ -50,6 +51,32 @@ export default function WhatsAppSyncCard({ onAdd, lastSynced }: Props) {
       }
     };
     reader.readAsText(file);
+  };
+
+  const [imgBusy, setImgBusy] = useState(false);
+  const handleImage = async (file: File) => {
+    setImgBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/ocr", { method: "POST", body: fd });
+      if (!res.ok) {
+        const e = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(e.error ?? `OCR failed: ${res.status}`);
+      }
+      const data = (await res.json()) as { rows: string[]; text: string };
+      if (data.rows.length === 0) {
+        setError("No timetable rows detected in that image.");
+        return;
+      }
+      handleParse((t) => parseWhatsAppDump(data.text || t));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setImgBusy(false);
+    }
   };
 
   return (
@@ -114,6 +141,19 @@ export default function WhatsAppSyncCard({ onAdd, lastSynced }: Props) {
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) handleFile(f);
+            }}
+          />
+        </label>
+        <label className={"rounded-md border border-border/40 px-3 py-1.5 text-xs font-medium hover:bg-muted/40 cursor-pointer " + (imgBusy ? "opacity-50 pointer-events-none" : "text-foreground")}>
+          {imgBusy ? "Reading…" : "Read image"}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleImage(f);
+              e.target.value = "";
             }}
           />
         </label>
