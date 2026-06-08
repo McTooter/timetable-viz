@@ -4,90 +4,52 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* --- Industrial timetable design tokens --- */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.25);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.147 0.004 49.25);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.147 0.004 49.25);
-  --primary: oklch(0.216 0.006 56.043);
-  --primary-foreground: oklch(0.985 0.001 106.423);
-  --secondary: oklch(0.97 0.001 106.424);
-  --secondary-foreground: oklch(0.216 0.006 56.043);
-  --muted: oklch(0.97 0.001 106.424);
-  --muted-foreground: oklch(0.553 0.013 58.071);
-  --accent: oklch(0.97 0.001 106.424);
-  --accent-foreground: oklch(0.216 0.006 56.043);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.923 0.003 48.717);
-  --input: oklch(0.923 0.003 48.717);
-  --ring: oklch(0.709 0.01 56.259);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0.001 106.423);
-  --sidebar-foreground: oklch(0.147 0.004 49.25);
-  --sidebar-primary: oklch(0.216 0.006 56.043);
-  --sidebar-primary-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-accent: oklch(0.97 0.001 106.424);
-  --sidebar-accent-foreground: oklch(0.216 0.006 56.043);
-  --sidebar-border: oklch(0.923 0.003 48.717);
-  --sidebar-ring: oklch(0.709 0.01 56.259);
-}
+  --radius: 0.25rem;
 
-.dark {
-  --background: oklch(0.147 0.004 49.25);
-  --foreground: oklch(0.985 0.001 106.423);
-  --card: oklch(0.216 0.006 56.043);
-  --card-foreground: oklch(0.985 0.001 106.423);
-  --popover: oklch(0.216 0.006 56.043);
-  --popover-foreground: oklch(0.985 0.001 106.423);
-  --primary: oklch(0.923 0.003 48.717);
-  --primary-foreground: oklch(0.216 0.006 56.043);
-  --secondary: oklch(0.268 0.007 34.298);
-  --secondary-foreground: oklch(0.985 0.001 106.423);
-  --muted: oklch(0.268 0.007 34.298);
-  --muted-foreground: oklch(0.709 0.01 56.259);
-  --accent: oklch(0.268 0.007 34.298);
-  --accent-foreground: oklch(0.985 0.001 106.423);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.553 0.013 58.071);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.216 0.006 56.043);
-  --sidebar-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-accent: oklch(0.268 0.007 34.298);
-  --sidebar-accent-foreground: oklch(0.985 0.001 106.423);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.553 0.013 58.071);
-}
+  --background: oklch(0.16 0.008 60);
+  --foreground: oklch(0.94 0.012 85);
+  --card: oklch(0.21 0.009 55);
+  --card-foreground: oklch(0.94 0.012 85);
+  --popover: oklch(0.18 0.008 60);
+  --popover-foreground: oklch(0.94 0.012 85);
 
-body {
-  margin: 0;
+  --primary: oklch(0.78 0.13 80); /* brass */
+  --primary-foreground: oklch(0.16 0.008 60);
+
+  --secondary: oklch(0.26 0.01 55);
+  --secondary-foreground: oklch(0.94 0.012 85);
+  --muted: oklch(0.26 0.01 55);
+  --muted-foreground: oklch(0.66 0.012 80);
+  --accent: oklch(0.34 0.014 55);
+  --accent-foreground: oklch(0.94 0.012 85);
+  --destructive: oklch(0.58 0.18 28);
+  --border: oklch(0.38 0.012 60 / 0.55);
+  --input: oklch(0.34 0.01 60);
+  --ring: oklch(0.78 0.13 80);
+
+  --school: oklch(0.78 0.13 80); /* brass */
+  --personal: oklch(0.62 0.08 165);
+  --blueprint: oklch(0.18 0.04 235);
+  --blueprint-line: oklch(0.74 0.12 215);
+  --blueprint-bg: oklch(0.12 0.04 240);
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --font-display: "Big Shoulders Display", "Impact", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -106,26 +68,160 @@ body {
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  --color-school: var(--school);
+  --color-personal: var(--personal);
+  --color-blueprint: var(--blueprint);
+  --color-blueprint-line: var(--blueprint-line);
+  --color-blueprint-bg: var(--blueprint-bg);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/40;
   }
+  html,
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(
+        circle at 20% 0%,
+        oklch(0.22 0.012 60) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        circle at 80% 100%,
+        oklch(0.2 0.015 50) 0%,
+        transparent 55%
+      );
+    background-attachment: fixed;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  /* Engineering-paper grid for the blueprint skeleton */
+  .blueprint-bg {
+    background-color: var(--blueprint-bg);
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklch, var(--blueprint-line) 25%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--blueprint-line) 25%, transparent) 1px,
+        transparent 1px
+      );
+    background-size:
+      24px 24px,
+      24px 24px;
+  }
+
+  /* Brass-engraved section divider (1px line with a small brass tick) */
+  .rule-engraved {
+    position: relative;
+    border-top: 1px solid var(--border);
+  }
+  .rule-engraved::before {
+    content: "";
+    position: absolute;
+    top: -3px;
+    left: 0;
+    width: 28px;
+    height: 5px;
+    background: var(--primary);
+    box-shadow: 0 0 0 1px oklch(0.16 0.008 60 / 0.6);
+  }
+}
+
+@layer utilities {
+  /* Staggered reveal keyframes for the hero moment */
+  @keyframes tty-reveal {
+    0% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .reveal {
+    opacity: 0;
+    animation: tty-reveal 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  }
+  .reveal-1 { animation-delay: 0.05s; }
+  .reveal-2 { animation-delay: 0.18s; }
+  .reveal-3 { animation-delay: 0.32s; }
+  .reveal-4 { animation-delay: 0.48s; }
+  .reveal-5 { animation-delay: 0.65s; }
+  .reveal-6 { animation-delay: 0.85s; }
+
+  /* Brass tick marker (used on selected/active rows) */
+  .tick-mark {
+    position: relative;
+  }
+  .tick-mark::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--primary);
+  }
+
+  /* Subtle paper grain overlay */
+  .paper-grain {
+    position: relative;
+  }
+  .paper-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(
+      circle at center,
+      transparent 0,
+      transparent 2px,
+      color-mix(in oklch, var(--foreground) 1.5%, transparent) 2px,
+      transparent 3px
+    );
+    background-size: 3px 3px;
+    mix-blend-mode: overlay;
+    opacity: 0.4;
+  }
+
+  /* Sweep line for blueprint loading */
+  @keyframes tty-sweep {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(2000%); }
+  }
+  .sweep-line {
+    position: absolute;
+    inset-inline: 0;
+    height: 80px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in oklch, var(--blueprint-line) 18%, transparent) 50%,
+      transparent
+    );
+    animation: tty-sweep 2.4s linear infinite;
   }
 }

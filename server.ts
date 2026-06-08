@@ -3,6 +3,21 @@ import type { ViteDevServer } from "vite";
 import { createServer as createViteServer } from "vite";
 import config from "./zosite.json";
 import { Hono } from "hono";
+import {
+  parseWhatsAppDump,
+  parseCSV,
+  parseJSONTimetable,
+  sortEntries,
+} from "./src/lib/timetable-parser";
+import {
+  getAllEntries,
+  upsertEntries,
+  removeEntry,
+  entryCount,
+  clearSource,
+} from "./src/lib/timetable-db";
+import { colorForSubject } from "./src/lib/timetable-types";
+import type { TimetableSource } from "./src/lib/timetable-types";
 
 // AI agents: read README.md for navigation and contribution guidance.
 type Mode = "development" | "production";
@@ -12,9 +27,115 @@ const mode: Mode =
   process.env.NODE_ENV === "production" ? "production" : "development";
 
 /**
- * Add any API routes here.
+ * API routes
  */
 app.get("/api/hello-zo", (c) => c.json({ msg: "Hello from Zo" }));
+
+app.get("/api/entries", (c) => {
+  return c.json({ entries: getAllEntries() });
+});
+
+app.post("/api/entries", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as
+    | {
+        entries?: Array<{
+          day: string;
+          startTime: string;
+          endTime: string;
+          subject: string;
+          location?: string;
+          source?: TimetableSource;
+          id?: string;
+        }>;
+        text?: string;
+        format?: "whatsapp" | "csv" | "json";
+        source?: TimetableSource;
+      }
+    | null;
+  if (!body) return c.json({ error: "invalid body" }, 400);
+
+  let entries: Array<{
+    day: string;
+    startTime: string;
+    endTime: string;
+    subject: string;
+    location?: string;
+    source: TimetableSource;
+    id?: string;
+    color?: string;
+  }> = [];
+
+  if (body.entries && Array.isArray(body.entries)) {
+    entries = body.entries.map((e) => ({
+      ...e,
+      source: (e.source ?? body.source ?? "whatsapp") as TimetableSource,
+    }));
+  } else if (body.text) {
+    const fmt = body.format ?? "whatsapp";
+    const parsed =
+      fmt === "csv"
+        ? parseCSV(body.text)
+        : fmt === "json"
+          ? parseJSONTimetable(body.text)
+          : parseWhatsAppDump(body.text);
+    entries = sortEntries(parsed).map((e) => ({
+      ...e,
+      source: (e.source ?? body.source ?? "whatsapp") as TimetableSource,
+    }));
+  } else {
+    return c.json({ error: "no entries or text provided" }, 400);
+  }
+
+  for (const e of entries) {
+    e.color = e.color ?? colorForSubject(e.subject);
+  }
+  const result = upsertEntries(entries as never);
+  return c.json({
+    added: result.added,
+    updated: result.updated,
+    total: entryCount(),
+  });
+});
+
+app.delete("/api/entries/:id", (c) => {
+  const id = c.req.param("id");
+  const ok = removeEntry(id);
+  return c.json({ ok });
+});
+
+app.delete("/api/entries", (c) => {
+  const source = c.req.query("source") as TimetableSource | undefined;
+  if (!source || (source !== "whatsapp" && source !== "personal")) {
+    return c.json({ error: "source must be 'whatsapp' or 'personal'" }, 400);
+  }
+  const n = clearSource(source);
+  return c.json({ removed: n });
+});
+
+/**
+ * Bot status — reports the standalone bot service's health, sourced from
+ * a small status file the bot process writes to. If the file is missing
+ * or stale, the bot is considered offline.
+ */
+app.get("/api/bot/status", async (c) => {
+  const statusFile =
+    process.env.TIMETABLE_BOT_STATUS_PATH ??
+    "/home/workspace/timetable-viz/.bot-status.json";
+  try {
+    const file = Bun.file(statusFile);
+    if (!(await file.exists())) {
+      return c.json({ running: false, lastSyncAt: null, lastSyncStats: null, nextSyncIn: null });
+    }
+    const status = (await file.json()) as {
+      running: boolean;
+      lastSyncAt: string | null;
+      lastSyncStats: { added: number; updated: number; messages: number } | null;
+    };
+    return c.json(status);
+  } catch {
+    return c.json({ running: false, lastSyncAt: null, lastSyncStats: null, nextSyncIn: null });
+  }
+});
 
 if (mode === "production") {
   configureProduction(app);
@@ -22,11 +143,6 @@ if (mode === "production") {
   await configureDevelopment(app);
 }
 
-/**
- * Determine port based on mode. In production, use the published_port if available.
- * In development, always use the local_port.
- * Ports are managed by the system and injected via the PORT environment variable.
- */
 const port = process.env.PORT
   ? parseInt(process.env.PORT, 10)
   : mode === "production"
@@ -35,13 +151,6 @@ const port = process.env.PORT
 
 export default { fetch: app.fetch, port, idleTimeout: 255 };
 
-/**
- * Configure routing for production builds.
- *
- * - Streams prebuilt assets from `dist`.
- * - Static files from `public/` are copied to `dist/` by Vite and served at root paths.
- * - Falls back to `index.html` for any other GET so the SPA router can resolve the request.
- */
 function configureProduction(app: Hono) {
   app.use("/assets/*", serveStatic({ root: "./dist" }));
   app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 302));
@@ -63,13 +172,6 @@ function configureProduction(app: Hono) {
   });
 }
 
-/**
- * Configure routing for development builds.
- *
- * - Boots Vite in middleware mode for transforms.
- * - Static files from `public/` are served at root paths (matching Vite convention).
- * - Mirrors production routing semantics so SPA routes behave consistently.
- */
 async function configureDevelopment(app: Hono): Promise<ViteDevServer> {
   const vite = await createViteServer({
     server: { middlewareMode: true, hmr: false, ws: false },

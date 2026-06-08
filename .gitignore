@@ -1,2 +1,19 @@
 node_modules/
 dist/
+.DS_Store
+*.local
+
+# Local data (sqlite, logs) and any secrets — never push
+timetable.sqlite
+timetable.sqlite-journal
+timetable.sqlite-shm
+timetable.sqlite-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+.bot-status.json
+data/
