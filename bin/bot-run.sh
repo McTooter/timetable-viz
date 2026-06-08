@@ -18,9 +18,9 @@ if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
   exit 1
 fi
 
-# Strip platform-managed vars we don't want to leak into logs.
-unset ZO_CLIENT_IDENTITY_TOKEN 2>/dev/null || true
-
+# Keep ZO_CLIENT_IDENTITY_TOKEN — the OCR path needs it to call the
+# /zo/ask vision API. Other secrets stay in env but are not exported
+# to the child explicitly (Bun inherits them).
 export TELEGRAM_BOT_TOKEN
 cd /home/workspace/timetable-viz
 exec bun run src/bin/telegram-bot.ts

@@ -1,0 +1,1 @@
+2026-06-08T12:06:25Z vision API 422: /zo/ask is rejecting image payloads (Input should be a valid string). OCR polling cannot fix this; ask the user to paste a description or send a text file instead.

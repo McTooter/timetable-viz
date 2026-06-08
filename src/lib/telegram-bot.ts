@@ -1,14 +1,32 @@
-import { Bot, InputFile } from "grammy";
-import { parseWhatsAppDump } from "./timetable-parser";
+/**
+ * Standalone Telegram bot process.
+ *
+ * Reads TELEGRAM_BOT_TOKEN from env, polls the bot's inbox every 6 hours,
+ * parses forwarded messages into timetable entries, and writes them to the
+ * shared SQLite DB. Writes a status JSON file (TIMETABLE_BOT_STATUS) so the
+ * web site can show "last sync" without needing to talk to this process.
+ *
+ * Run as a supervised process on the Zo Computer:
+ *   register_user_service({ label: "timetable-bot", mode: "process",
+ *     entrypoint: "bun run /home/workspace/timetable-viz/src/bin/telegram-bot.ts" })
+ */
+
+import { Bot } from "grammy";
+import { parseWhatsAppDump } from "../lib/timetable-parser";
+import { imageToTimetableText, parseExtractedRows } from "../lib/timetable-ocr";
 import {
   upsertEntries,
   entryCount,
   clearSource,
-} from "./timetable-db";
-import type { TimetableEntry } from "./timetable-types";
-import { colorForSubject } from "./timetable-types";
+} from "../lib/timetable-db";
+import { colorForSubject } from "../lib/timetable-types";
+import { writeFileSync } from "node:fs";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const STATUS_PATH =
+  process.env.TIMETABLE_BOT_STATUS ??
+  "/home/workspace/timetable-viz/.bot-status.json";
+
 const HELP_TEXT = `Hi! I'm your timetable bot.
 
 How this works:
@@ -18,16 +36,9 @@ How this works:
 
 Commands:
 /sync — parse all messages in our chat right now
-/clear <source> — wipe school or personal entries
+/clear <school|personal> — wipe one side of the table
 /status — show what's in the table
 /help — this message`;
-
-let _bot: Bot | null = null;
-let _updateOffset = 0;
-let _pollingTimer: ReturnType<typeof setTimeout> | null = null;
-let _lastSyncAt: string | null = null;
-let _lastSyncStats: { added: number; updated: number; messages: number } | null =
-  null;
 
 type StoredMessage = {
   update_id: number;
@@ -37,38 +48,81 @@ type StoredMessage = {
   date: number;
 };
 
-let _bufferedMessages: StoredMessage[] = [];
+let updateOffset = 0;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSyncAt: string | null = null;
+let lastSyncStats: { added: number; updated: number; messages: number } | null =
+  null;
+let bufferedMessages: StoredMessage[] = [];
 
-function formatSyncStats(
-  stats: { added: number; updated: number; messages: number } | null,
-): string {
-  if (!stats) return "No sync run yet.";
-  const { added, updated, messages } = stats;
-  return `Scanned ${messages} message${messages === 1 ? "" : "s"} · added ${added} · updated ${updated}`;
+function writeStatus() {
+  try {
+    const status = {
+      running: true,
+      lastSyncAt,
+      lastSyncStats,
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(STATUS_PATH, JSON.stringify(status, null, 2));
+  } catch (err) {
+    console.error("[bot] failed to write status:", err);
+  }
 }
 
 async function fetchNewMessages(bot: Bot): Promise<StoredMessage[]> {
   const updates = await bot.api.getUpdates({
-    offset: _updateOffset,
+    offset: updateOffset,
     timeout: 0,
     allowed_updates: ["message"],
   });
   const messages: StoredMessage[] = [];
   for (const update of updates) {
-    _updateOffset = update.update_id + 1;
+    updateOffset = update.update_id + 1;
     if (!update.message) continue;
     const msg = update.message;
-    const text = msg.text ?? msg.caption ?? "";
-    if (!text && !msg.document) continue;
-    let resolvedText = text;
-    if (msg.document) {
+    const caption = msg.text ?? msg.caption ?? "";
+    const hasPhoto = !!getLargestPhoto(msg);
+    const hasImageDoc = isImageDoc(msg);
+    const hasTextDoc = msg.document && !hasImageDoc;
+    if (!caption && !msg.document && !hasPhoto) continue;
+    let resolvedText = caption;
+    if (hasImageDoc) {
+      try {
+        const file = await bot.api.getFile(msg.document.file_id);
+        const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
+        const resp = await fetch(url);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        const b64 = btoa(String.fromCharCode(...buf));
+        const ocrText = await imageToTimetableText({ base64: b64, mimeType: msg.document.mime_type || "image/jpeg" });
+        const rows = parseExtractedRows(ocrText);
+        resolvedText = rows.join("\\n");
+      } catch (err) {
+        console.error("[bot] image-doc OCR failed:", err);
+      }
+    } else if (hasPhoto) {
+      try {
+        const photo = getLargestPhoto(msg)!;
+        const file = await bot.api.getFile(photo.file_id);
+        const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
+        const resp = await fetch(url);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        const b64 = btoa(String.fromCharCode(...buf));
+        const mime = resp.headers.get("content-type") || "image/jpeg";
+        const ocrText = await imageToTimetableText({ base64: b64, mimeType: mime });
+        const rows = parseExtractedRows(ocrText);
+        // caption text first (might have day+time context), then OCR rows
+        resolvedText = (caption ? caption + "\n" : "") + rows.join("\\n");
+      } catch (err) {
+        console.error("[bot] photo OCR failed:", err);
+      }
+    } else if (hasTextDoc) {
       try {
         const file = await bot.api.getFile(msg.document.file_id);
         const url = `https://api.telegram.org/file/bot${bot.token}/${file.file_path}`;
         const resp = await fetch(url);
         resolvedText = await resp.text();
       } catch (err) {
-        console.error("[telegram-bot] failed to download document:", err);
+        console.error("[bot] failed to download document:", err);
       }
     }
     if (!resolvedText) continue;
@@ -83,71 +137,90 @@ async function fetchNewMessages(bot: Bot): Promise<StoredMessage[]> {
   return messages;
 }
 
-function parseAndStore(
-  messages: StoredMessage[],
-): { added: number; updated: number; parsed: TimetableEntry[]; messages: number } {
-  const all: TimetableEntry[] = [];
+
+
+function getLargestPhoto(msg: any): { file_id: string } | null {
+  const photos = msg?.photo;
+  if (!Array.isArray(photos) || photos.length === 0) return null;
+  return photos[photos.length - 1];
+}
+
+function isImageDoc(msg: any): boolean {
+  const mt = msg?.document?.mime_type ?? "";
+  return mt.startsWith("image/");
+}
+
+function parseAndStore(messages: StoredMessage[]) {
+  const all: Array<{
+    day: string;
+    startTime: string;
+    endTime: string;
+    subject: string;
+    location?: string;
+    source: "whatsapp";
+    id: string;
+    color?: string;
+  }> = [];
   for (const m of messages) {
     const parsed = parseWhatsAppDump(m.text);
-    for (const e of parsed) {
-      e.color = e.color ?? colorForSubject(e.subject);
-      e.id = `tg-${m.chat_id}-${m.message_id}-${all.length}`;
+    for (let i = 0; i < parsed.length; i++) {
+      const e = parsed[i];
+      all.push({
+        ...e,
+        id: `tg-${m.chat_id}-${m.message_id}-${i}`,
+        color: e.color ?? colorForSubject(e.subject),
+      });
     }
-    all.push(...parsed);
   }
   if (all.length === 0) {
-    return { added: 0, updated: 0, parsed: [], messages: messages.length };
+    return { added: 0, updated: 0, messages: messages.length };
   }
   const { added, updated } = upsertEntries(all);
-  return { added, updated, parsed: all, messages: messages.length };
+  return { added, updated, messages: messages.length };
 }
 
 async function syncCycle(bot: Bot, source: "scheduled" | "manual" = "scheduled") {
   try {
     const messages = await fetchNewMessages(bot);
-    _bufferedMessages.push(...messages);
-    if (_bufferedMessages.length === 0) {
-      _lastSyncAt = new Date().toISOString();
-      _lastSyncStats = { added: 0, updated: 0, messages: 0 };
-      console.log("[telegram-bot] sync: no new messages");
+    bufferedMessages.push(...messages);
+    if (bufferedMessages.length === 0) {
+      lastSyncAt = new Date().toISOString();
+      lastSyncStats = { added: 0, updated: 0, messages: 0 };
+      console.log(`[bot] sync (${source}): no new messages`);
+      writeStatus();
       return;
     }
-    const result = parseAndStore(_bufferedMessages);
-    _bufferedMessages = [];
-    _lastSyncAt = new Date().toISOString();
-    _lastSyncStats = {
-      added: result.added,
-      updated: result.updated,
-      messages: result.messages,
-    };
+    const result = parseAndStore(bufferedMessages);
+    bufferedMessages = [];
+    lastSyncAt = new Date().toISOString();
+    lastSyncStats = result;
     console.log(
-      `[telegram-bot] sync (${source}): ${formatSyncStats(_lastSyncStats)}`,
+      `[bot] sync (${source}): scanned ${result.messages} · added ${result.added} · updated ${result.updated}`,
     );
+    writeStatus();
   } catch (err) {
-    console.error("[telegram-bot] sync error:", err);
+    console.error("[bot] sync error:", err);
   }
 }
 
 function scheduleNext(bot: Bot) {
-  if (_pollingTimer) clearTimeout(_pollingTimer);
-  _pollingTimer = setTimeout(async () => {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
     await syncCycle(bot, "scheduled");
     scheduleNext(bot);
   }, POLL_INTERVAL_MS);
 }
 
-export function startTelegramBot(): { ok: boolean; reason?: string } {
+async function main() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    console.warn(
-      "[telegram-bot] TELEGRAM_BOT_TOKEN not set — bot disabled. Add it in Settings → Advanced → Secrets.",
+    console.error(
+      "[bot] TELEGRAM_BOT_TOKEN is not set. Add it in Settings → Advanced → Secrets, then restart this service.",
     );
-    return { ok: false, reason: "missing-token" };
+    process.exit(1);
   }
-  if (_bot) return { ok: true };
 
   const bot = new Bot(token);
-  _bot = bot;
 
   bot.command("start", (ctx) => ctx.reply(HELP_TEXT));
   bot.command("help", (ctx) => ctx.reply(HELP_TEXT));
@@ -156,18 +229,17 @@ export function startTelegramBot(): { ok: boolean; reason?: string } {
     await ctx.reply("Syncing now…");
     await syncCycle(bot, "manual");
     const total = entryCount("whatsapp");
-    await ctx.reply(
-      `Done. ${formatSyncStats(_lastSyncStats)}\nTotal school entries: ${total}`,
-    );
+    const stats = lastSyncStats
+      ? `Scanned ${lastSyncStats.messages} · added ${lastSyncStats.added} · updated ${lastSyncStats.updated}`
+      : "No messages yet.";
+    await ctx.reply(`Done. ${stats}\nTotal school entries: ${total}`);
   });
 
   bot.command("status", (ctx) => {
     const total = entryCount();
     const school = entryCount("whatsapp");
     const personal = entryCount("personal");
-    const lastSync = _lastSyncAt
-      ? new Date(_lastSyncAt).toISOString()
-      : "never";
+    const lastSync = lastSyncAt ? new Date(lastSyncAt).toISOString() : "never";
     ctx.reply(
       `Entries — total: ${total} · school: ${school} · personal: ${personal}\nLast sync: ${lastSync}\nNext sync: every 6 hours`,
     );
@@ -179,51 +251,77 @@ export function startTelegramBot(): { ok: boolean; reason?: string } {
       return ctx.reply("Usage: /clear school  or  /clear personal");
     }
     const source = arg === "school" ? "whatsapp" : "personal";
-    const n = clearSource(source as "whatsapp" | "personal");
+    const n = clearSource(source);
     return ctx.reply(`Cleared ${n} ${arg} entries.`);
   });
 
   bot.on("message:text", (ctx) => {
     if (ctx.message.text.startsWith("/")) return;
     console.log(
-      `[telegram-bot] buffered message ${ctx.message.message_id} from chat ${ctx.chat.id}`,
+      `[bot] buffered message ${ctx.message.message_id} from chat ${ctx.chat.id}`,
     );
   });
 
-  // Start a single sync cycle, then schedule every 6h.
-  syncCycle(bot, "manual").then(() => scheduleNext(bot));
 
-  console.log(
-    `[telegram-bot] started — polling every ${POLL_INTERVAL_MS / 1000 / 60 / 60}h`,
-  );
-  return { ok: true };
-}
+  bot.on("message:photo", async (ctx) => {
+    const photo = ctx.message.photo?.[ctx.message.photo.length - 1];
+    if (!photo) return;
+    try {
+      const file = await ctx.api.getFile(photo.file_id);
+      const url = `https://api.telegram.org/file/bot${ctx.me.token}/${file.file_path}`;
+      const resp = await fetch(url);
+      const buf = new Uint8Array(await resp.arrayBuffer());
+      const b64 = btoa(String.fromCharCode(...buf));
+      const mime = resp.headers.get("content-type") || "image/jpeg";
+      await ctx.reply("reading image…");
+      const ocrText = await imageToTimetableText({ base64: b64, mimeType: mime });
+      const rows = parseExtractedRows(ocrText);
+      if (rows.length === 0) {
+        await ctx.reply("Couldn't find a timetable in that image. Try a clearer shot or paste the text directly.");
+        return;
+      }
+      const caption = ctx.message.caption ?? "";
+      const all = ((caption ? caption + "\n" : "") + rows.join("\\n")).trim();
+      const parsed = parseWhatsAppDump(all);
+      if (parsed.length === 0) {
+        await ctx.reply(`Read ${rows.length} line(s) from the image but couldn't parse them:\n${rows.slice(0, 3).join("\n")}`);
+        return;
+      }
+      for (let i = 0; i < parsed.length; i++) {
+        const e = parsed[i];
+        e.id = `tg-${ctx.chat.id}-${ctx.message.message_id}-${i}`;
+        e.color = e.color ?? colorForSubject(e.subject);
+      }
+      const result = upsertEntries(parsed as never);
+      await ctx.reply(`Added ${result.added}, updated ${result.updated} from the image.`);
+    } catch (err) {
+      console.error("[bot] photo handler error:", err);
+      await ctx.reply(`Image read failed: ${String(err).slice(0, 200)}`).catch(() => {});
+    }
+  });
 
-export function getBotStatus() {
-  return {
-    running: _bot !== null,
-    lastSyncAt: _lastSyncAt,
-    lastSyncStats: _lastSyncStats,
-    nextSyncIn: _pollingTimer
-      ? Math.max(0, POLL_INTERVAL_MS - 0)
-      : null,
-  };
-}
-
-export async function triggerSyncNow(): Promise<{
-  added: number;
-  updated: number;
-  messages: number;
-  lastSyncAt: string;
-}> {
-  if (!_bot) {
-    throw new Error("Telegram bot not started (missing token?)");
+  try {
+    const me = await bot.api.getMe();
+    console.log(`[bot] logged in as @${me.username} (id ${me.id})`);
+  } catch (err) {
+    console.error("[bot] failed to authenticate. Check TELEGRAM_BOT_TOKEN:", err);
+    process.exit(1);
   }
-  await syncCycle(_bot, "manual");
-  return {
-    added: _lastSyncStats?.added ?? 0,
-    updated: _lastSyncStats?.updated ?? 0,
-    messages: _lastSyncStats?.messages ?? 0,
-    lastSyncAt: _lastSyncAt ?? new Date().toISOString(),
+
+  writeStatus();
+  await syncCycle(bot, "manual");
+  scheduleNext(bot);
+  console.log(`[bot] polling every ${POLL_INTERVAL_MS / 1000 / 60 / 60}h`);
+
+  setInterval(writeStatus, 60 * 1000);
+
+  const shutdown = () => {
+    console.log("[bot] shutting down");
+    if (pollTimer) clearTimeout(pollTimer);
+    process.exit(0);
   };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
+
+main();

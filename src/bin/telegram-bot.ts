@@ -95,8 +95,7 @@ async function fetchNewMessages(bot: Bot): Promise<StoredMessage[]> {
         const b64 = btoa(String.fromCharCode(...buf));
         const ocrText = await imageToTimetableText({ base64: b64, mimeType: msg.document.mime_type || "image/jpeg" });
         const rows = parseExtractedRows(ocrText);
-        resolvedText = rows.join("
-");
+        resolvedText = rows.join("\\n");
       } catch (err) {
         console.error("[bot] image-doc OCR failed:", err);
       }
@@ -112,9 +111,7 @@ async function fetchNewMessages(bot: Bot): Promise<StoredMessage[]> {
         const ocrText = await imageToTimetableText({ base64: b64, mimeType: mime });
         const rows = parseExtractedRows(ocrText);
         // caption text first (might have day+time context), then OCR rows
-        resolvedText = (caption ? caption + "
-" : "") + rows.join("
-");
+        resolvedText = (caption ? caption + "\n" : "") + rows.join("\\n");
       } catch (err) {
         console.error("[bot] photo OCR failed:", err);
       }
@@ -266,6 +263,7 @@ async function main() {
   });
 
 
+
   bot.on("message:photo", async (ctx) => {
     const photo = ctx.message.photo?.[ctx.message.photo.length - 1];
     if (!photo) return;
@@ -274,35 +272,18 @@ async function main() {
       const url = `https://api.telegram.org/file/bot${ctx.me.token}/${file.file_path}`;
       const resp = await fetch(url);
       const buf = new Uint8Array(await resp.arrayBuffer());
-      const b64 = btoa(String.fromCharCode(...buf));
-      const mime = resp.headers.get("content-type") || "image/jpeg";
-      await ctx.reply("reading image…");
-      const ocrText = await imageToTimetableText({ base64: b64, mimeType: mime });
-      const rows = parseExtractedRows(ocrText);
-      if (rows.length === 0) {
-        await ctx.reply("Couldn't find a timetable in that image. Try a clearer shot or paste the text directly.");
-        return;
-      }
+      const ext = (resp.headers.get("content-type") || "image/jpeg").split("/")[1] || "jpg";
+      const filename = `tt-${Date.now()}-${ctx.message.message_id}.${ext}`;
+      const localPath = `/home/workspace/timetable-viz/telegram-images/${filename}`;
+      await Bun.write(localPath, buf);
       const caption = ctx.message.caption ?? "";
-      const all = ((caption ? caption + "\n" : "") + rows.join("\n")).trim();
-      const parsed = parseWhatsAppDump(all);
-      if (parsed.length === 0) {
-        await ctx.reply(`Read ${rows.length} line(s) from the image but couldn't parse them:\n${rows.slice(0, 3).join("\n")}`);
-        return;
-      }
-      for (let i = 0; i < parsed.length; i++) {
-        const e = parsed[i];
-        e.id = `tg-${ctx.chat.id}-${ctx.message.message_id}-${i}`;
-        e.color = e.color ?? colorForSubject(e.subject);
-      }
-      const result = upsertEntries(parsed as never);
-      await ctx.reply(`Added ${result.added}, updated ${result.updated} from the image.`);
+      await ctx.reply(`📥 saved (${Math.round(buf.length / 1024)}kb) — handing off to Zo for OCR`);
+      console.log(`[bot] PHOTO_PENDING ${localPath} chat=${ctx.chat.id} msg=${ctx.message.message_id} caption=${JSON.stringify(caption)}`);
     } catch (err) {
-      console.error("[bot] photo handler error:", err);
-      await ctx.reply(`Image read failed: ${String(err).slice(0, 200)}`).catch(() => {});
+      console.error("[bot] photo save failed:", err);
+      await ctx.reply(`Image save failed: ${String(err).slice(0, 200)}`).catch(() => {});
     }
   });
-
   try {
     const me = await bot.api.getMe();
     console.log(`[bot] logged in as @${me.username} (id ${me.id})`);
